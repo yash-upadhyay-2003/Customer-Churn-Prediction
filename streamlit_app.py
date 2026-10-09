@@ -1,18 +1,49 @@
+"""
+Streamlit Web Frontend Application for Customer Churn Prediction.
+
+Role in Architecture:
+- Provides a clean, modern, interactive web dashboard for business stakeholders.
+- Decoupled Presentation Layer: Contains ZERO scikit-learn or joblib imports.
+  All validation, preprocessing, and inference are delegated to the FastAPI backend.
+- Communicates with FastAPI over HTTP:
+    - GET  /health  -> sidebar service status monitoring.
+    - POST /predict -> customer feature submission and prediction retrieval.
+- Displays prediction results: predicted class, probability score, visual risk bands,
+  driving factor contributions, and non-causal statistical disclaimers.
+"""
+
 import os
 from typing import Any, Dict, List, Optional
 import requests
 import streamlit as st
 
+# -----------------------------------------------------------------------------
+# 1. API CONFIGURATION & ENVIRONMENT LOOKUP
+# -----------------------------------------------------------------------------
+# Sourced from environment variable API_BASE_URL (useful when deploying to Streamlit Cloud
+# pointing to a remote FastAPI URL on Render). Defaults to local FastAPI dev server.
 API_BASE_URL: str = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
 def main() -> None:
+    """
+    Main Streamlit application entry point.
+
+    Coordinates UI rendering, user input collection, client-side validation,
+    API communication, and visualization of churn predictions and factor explanations.
+    """
+    # Configure browser tab title and responsive layout
     st.set_page_config(
         page_title="Customer Churn Prediction",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
 
+    # -------------------------------------------------------------------------
+    # 2. CUSTOM CSS STYLING & DESIGN SYSTEM
+    # -------------------------------------------------------------------------
+    # Injects clean, production-grade SaaS styles: neutral typography, subtle borders,
+    # and structured card layouts to create a polished executive assessment interface.
     st.markdown(
         """
         <style>
@@ -150,6 +181,9 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    # -------------------------------------------------------------------------
+    # 3. PAGE HEADER
+    # -------------------------------------------------------------------------
     st.markdown('<div class="app-title">Customer Churn Prediction</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="app-desc">'
@@ -160,7 +194,11 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Sidebar: Service connectivity & threshold reference
+    # -------------------------------------------------------------------------
+    # 4. SIDEBAR: HEALTH CHECK & RISK REFERENCE
+    # -------------------------------------------------------------------------
+    # Provides users with a live connectivity test to the backend API without
+    # needing to submit customer prediction data.
     with st.sidebar:
         st.subheader("Service Status")
         if st.button("Check Service Status"):
@@ -186,7 +224,9 @@ def main() -> None:
             """
         )
 
-    # Section 1: Customer Profile
+    # -------------------------------------------------------------------------
+    # 5. INPUT FORM SECTION 1: CUSTOMER PROFILE (DEMOGRAPHICS)
+    # -------------------------------------------------------------------------
     st.markdown('<div class="section-title">1. Customer Profile</div>', unsafe_allow_html=True)
     cp1, cp2, cp3, cp4 = st.columns(4)
     with cp1:
@@ -202,7 +242,13 @@ def main() -> None:
     with cp4:
         dependents = st.selectbox("Dependents", options=["No", "Yes"])
 
-    # Section 2: Account Details
+
+    # -------------------------------------------------------------------------
+    # 6. INPUT FORM SECTION 2: ACCOUNT & BILLING DETAILS
+    # -------------------------------------------------------------------------
+    # Captures contractual duration and payment terms.
+    # Note: 'TotalCharges' is optional. If left blank, it defaults to None and is
+    # safely handled via median imputation in the ML preprocessing pipeline.
     st.markdown('<div class="section-title">2. Account Details</div>', unsafe_allow_html=True)
     ac1, ac2, ac3 = st.columns(3)
     with ac1:
@@ -242,7 +288,11 @@ def main() -> None:
             help="Accumulated lifetime charges. Leave blank for new accounts (handled by pipeline imputation).",
         )
 
-    # Section 3: Services
+    # -------------------------------------------------------------------------
+    # 7. INPUT FORM SECTION 3: SUBSCRIBED SERVICES
+    # -------------------------------------------------------------------------
+    # Captures phone, internet, streaming, and cybersecurity add-ons.
+    # These services are aggregated by feature engineering into 'ActiveServiceCount'.
     st.markdown('<div class="section-title">3. Services</div>', unsafe_allow_html=True)
     sv1, sv2, sv3 = st.columns(3)
     with sv1:
@@ -285,8 +335,11 @@ def main() -> None:
     st.write("")
     predict_clicked = st.button("Predict Churn", type="primary", use_container_width=True)
 
+    # -------------------------------------------------------------------------
+    # 8. PREDICTION TRIGGER & CLIENT-SIDE VALIDATION
+    # -------------------------------------------------------------------------
     if predict_clicked:
-        # Validate TotalCharges input
+        # Validate TotalCharges input: convert to float or set None for blank inputs
         total_charges_parsed: Optional[float] = None
         cleaned_total = total_charges_raw.strip()
         if cleaned_total:
@@ -300,6 +353,7 @@ def main() -> None:
                 st.error("Total Charges must be a valid number or left blank.")
                 return
 
+        # Construct JSON request payload matching ChurnPredictionRequest schema
         payload: Dict[str, Any] = {
             "gender": gender,
             "SeniorCitizen": senior_citizen_opt,
@@ -322,6 +376,9 @@ def main() -> None:
             "TotalCharges": total_charges_parsed,
         }
 
+        # ---------------------------------------------------------------------
+        # 9. HTTP API CALL TO FASTAPI BACKEND
+        # ---------------------------------------------------------------------
         with st.spinner("Requesting prediction from ML service..."):
             try:
                 response = requests.post(
@@ -342,6 +399,9 @@ def main() -> None:
                 st.error("An error occurred while contacting the prediction service.")
                 return
 
+        # ---------------------------------------------------------------------
+        # 10. PREDICTION RESPONSE PARSING & METRIC EXTRACTION
+        # ---------------------------------------------------------------------
         if response.status_code == 200:
             try:
                 result = response.json()
@@ -363,7 +423,7 @@ def main() -> None:
                     status_subtext = "Predicted Class: Retained (0)"
                     status_color = "#166534"
 
-                # 2. Risk Level Presentation Bands
+                # 2. Risk Level Presentation Bands based on model probability
                 if probability < 0.30:
                     risk_level = "Low Risk"
                     risk_color = "#166534"
@@ -388,7 +448,10 @@ def main() -> None:
 
                 prob_percent = f"{probability * 100:.2f}%"
 
-                # Render Redesigned Prediction Experience
+                # -------------------------------------------------------------
+                # 11. UI RENDERING: ASSESSMENT BANNER & METRICS
+                # -------------------------------------------------------------
+                # Render primary Customer Churn Assessment Banner
                 st.markdown(
                     f"""
                     <div class="result-box">
@@ -400,7 +463,7 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
 
-                # Metric Cards
+                # Render 3 Key Metric Cards: Probability, Risk Band, Decision Threshold
                 m1, m2, m3 = st.columns(3)
                 with m1:
                     st.markdown(
@@ -451,7 +514,7 @@ def main() -> None:
                         unsafe_allow_html=True,
                     )
 
-                # "What this means" section
+                # Render business explanation panel
                 st.markdown(
                     f"""
                     <div class="info-panel">
@@ -461,7 +524,10 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
 
-                # Model-Based Explanation: Factors influencing prediction
+                # -------------------------------------------------------------
+                # 12. EXPLAINABILITY: TOP CONTRIBUTING FACTORS
+                # -------------------------------------------------------------
+                # Displays features driving prediction toward churn vs away from churn
                 st.markdown('<div class="section-title">Factors Influencing This Prediction</div>', unsafe_allow_html=True)
                 fcol1, fcol2 = st.columns(2)
 
@@ -503,6 +569,7 @@ def main() -> None:
                         unsafe_allow_html=True,
                     )
 
+                # Non-causal statistical disclaimer
                 st.markdown(
                     '<div class="disclaimer-text">'
                     "Note: These factors represent statistical contributions derived from the trained Logistic Regression model "
@@ -511,7 +578,7 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
 
-                # Technical Model Details
+                # Technical model metadata footer
                 st.markdown(
                     f"""
                     <div class="meta-grid">
@@ -526,6 +593,7 @@ def main() -> None:
 
             except Exception:
                 st.error("Failed to parse prediction response from API.")
+        # Error handling for non-200 HTTP responses
         elif response.status_code == 422:
             st.error("Input validation error: The data provided does not match API schema requirements.")
         elif response.status_code == 503:
@@ -536,5 +604,7 @@ def main() -> None:
             st.error(f"Prediction failed with HTTP status code {response.status_code}.")
 
 
+# Script execution entry point
 if __name__ == "__main__":
     main()
+
